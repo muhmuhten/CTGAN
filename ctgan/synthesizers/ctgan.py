@@ -1,6 +1,9 @@
 """CTGAN module."""
 
 import warnings
+warnings.simplefilter(action='ignore', category=FutureWarning)
+from sklearn.exceptions import ConvergenceWarning
+warnings.simplefilter(action='ignore', category=ConvergenceWarning)
 
 import numpy as np
 import pandas as pd
@@ -160,6 +163,7 @@ class CTGAN(BaseSynthesizer):
         epochs=300,
         pac=10,
         cuda=True,
+        dp=False,
     ):
         assert batch_size % 2 == 0
 
@@ -178,6 +182,9 @@ class CTGAN(BaseSynthesizer):
         self._verbose = verbose
         self._epochs = epochs
         self.pac = pac
+
+        self.dp = dp
+        print('Init CTGAN with differential privacy')
 
         if not cuda or not torch.cuda.is_available():
             device = 'cpu'
@@ -431,6 +438,11 @@ class CTGAN(BaseSynthesizer):
                     loss_d = -(torch.mean(y_real) - torch.mean(y_fake))
 
                     optimizerD.zero_grad(set_to_none=False)
+                    if self.dp:
+                        # add random gaussian noise to loss_d
+                        loss_d += torch.randn(1).item()
+
+                    optimizerD.zero_grad()
                     pen.backward(retain_graph=True)
                     loss_d.backward()
                     optimizerD.step()
@@ -462,6 +474,11 @@ class CTGAN(BaseSynthesizer):
                 loss_g = -torch.mean(y_fake) + cross_entropy
 
                 optimizerG.zero_grad(set_to_none=False)
+                if self.dp:
+                    # Add random noise to loss_g
+                    loss_g += torch.randn(1).item()
+
+                optimizerG.zero_grad()
                 loss_g.backward()
                 optimizerG.step()
 
