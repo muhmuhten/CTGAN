@@ -24,8 +24,9 @@ if __name__ == '__main__':
         'income'
     ]
 
-    ctgan = CTGANSynthesizer(epochs=1, verbose=True, dp=False)
+    ctgan = CTGANSynthesizer(epochs=500, verbose=True, private=True)
     ctgan.fit(data, discrete_columns)
+    ctgan.plot_losses(save=True)
 
     # evaluate performance using real data
     _data = convert_adult_ds(data)
@@ -43,7 +44,4 @@ if __name__ == '__main__':
     y_syn = _samples['income']
     print('\nTrain on fake, test on real')
     fake = eval_dataset(X_syn, y_syn, X_test, y_test)
-
-    print(len(X_train), len(X_syn))
-    # assert len(X_train) == len(X_syn), 'Training data do not have same length, check again!'
 
