@@ -566,7 +566,7 @@ class CTGAN(BaseSynthesizer):
                     description.format(gen=generator_loss, dis=discriminator_loss)
                 )
 
-    def plot_losses(self):
+    def plot_losses(self, save=False):
         plt.figure(figsize=(10, 5))
         plt.title("Generator and Discriminator Loss during training")
         plt.plot(self._G_losses, label='G')
@@ -575,6 +575,9 @@ class CTGAN(BaseSynthesizer):
         plt.ylabel('Loss')
         plt.legend()
         plt.show()
+
+        if save:
+            plt.savefig('losses.png')
 
     @random_state
     def sample(self, n, condition_column=None, condition_value=None):
