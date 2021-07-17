@@ -402,8 +402,8 @@ class CTGAN(BaseSynthesizer):
 
         self.loss_values = pd.DataFrame(columns=['Epoch', 'Generator Loss', 'Distriminator Loss'])
         i = 0
-        G_losses = []
-        D_losses = []
+        self._G_losses = []
+        self._D_losses = []
         epsilon = 0
         print("Starting Training Loop...")
 
@@ -523,8 +523,8 @@ class CTGAN(BaseSynthesizer):
                 optimizerG.step()  # Update G
 
             # Save Losses for plotting later
-            G_losses.append(loss_g.item())
-            D_losses.append(loss_d.item())
+            self._G_losses.append(loss_g.item())
+            self._D_losses.append(loss_d.item())
 
             if self._private:
                 # calculate current privacy cost using the accountant
@@ -567,15 +567,15 @@ class CTGAN(BaseSynthesizer):
                     description.format(gen=generator_loss, dis=discriminator_loss)
                 )
 
-        if self._plot:
-            plt.figure(figsize=(10, 5))
-            plt.title("Generator and Discriminator Loss during training")
-            plt.plot(G_losses, label='G')
-            plt.plot(D_losses, label='D')
-            plt.xlabel('iterations')
-            plt.ylabel('Loss')
-            plt.legend()
-            plt.show()
+    def plot_losses(self):
+        plt.figure(figsize=(10, 5))
+        plt.title("Generator and Discriminator Loss during training")
+        plt.plot(self._G_losses, label='G')
+        plt.plot(self._D_losses, label='D')
+        plt.xlabel('iterations')
+        plt.ylabel('Loss')
+        plt.legend()
+        plt.show()
 
     @random_state
     def sample(self, n, condition_column=None, condition_value=None):
