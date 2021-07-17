@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import torch
 from torch import optim
-from torch.nn import BatchNorm1d, Dropout, LeakyReLU, Linear, Module, ReLU, Sequential, functional
+from torch.nn import BatchNorm1d, Dropout, LeakyReLU, Linear, Module, ReLU, Sequential, functional, utils
 from tqdm import tqdm
 
 from ctgan.data_sampler import DataSampler
@@ -145,10 +145,18 @@ class CTGAN(BaseSynthesizer):
             Whether to attempt to use cuda for GPU computation.
             If this is False or CUDA is not available, CPU will be used.
             Defaults to ``True``.
-        dp (bool):
+        private (bool):
             Inject random noise during optimization procedure in order to achieve
             differential privacy. Currently only naively inject noise.
             Defaults to ``False``.
+        clip_coeff (int):
+            Gradient clipping bound. Defaults to ``0.1``.
+        sigma (int):
+            Noise scale. Defaults to ``2``.
+        epsilon (int):
+            Differential privacy budget
+        delta (int):
+            Differential privacy budget
     """
 
     def __init__(
@@ -167,7 +175,11 @@ class CTGAN(BaseSynthesizer):
         epochs=300,
         pac=10,
         cuda=True,
-        dp=False,
+        private=False,
+        clip_coeff=0.1,
+        sigma=2,
+        epsilon=None,
+        delta=None):
     ):
         assert batch_size % 2 == 0
 
@@ -187,8 +199,12 @@ class CTGAN(BaseSynthesizer):
         self._epochs = epochs
         self.pac = pac
 
-        self.dp = dp
-        if self.dp:
+        self.private = private
+        self.clip_coeff = clip_coeff
+        self.sigma = sigma
+        self.epsilon = epsilon
+        self.delta = delta
+        if self.private:
             print('Init CTGAN with differential privacy')
 
         if not cuda or not torch.cuda.is_available():
@@ -440,17 +456,33 @@ class CTGAN(BaseSynthesizer):
                     pen = discriminator.calc_gradient_penalty(
                         real_cat, fake_cat, self._device, self.pac
                     )
+
+                    # compute discriminator's gradient
                     loss_d = -(torch.mean(y_real) - torch.mean(y_fake))
 
-                    optimizerD.zero_grad(set_to_none=False)
-                    if self.dp:
-                        # add random gaussian noise to loss_d
-                        loss_d += torch.randn(1).item()
+                    # clamp parameters into [-0.01, 0.01]
+                    for p in discriminator.parameters():
+                        p.data.clamp_(-0.01, 0.01)
 
-                    optimizerD.zero_grad()
+                    # weight clipping
+                    utils.clip_grad_norm_(discriminator.parameters(), self.clip_coeff)
+
+                    clipped_grads = {
+                        name: torch.zeros_like(param, dtype=torch.double) for name, param in
+                        discriminator.named_parameters()
+                    }
+
+                    # add noise
+                    for name, param in discriminator.named_parameters():
+                        if param.grad is not None:
+                            noise = torch.DoubleTensor(clipped_grads[name].size()).normal_(0, self.sigma * self.clip_coeff).to(self._device)
+                            clipped_grads[name] += param.grad + noise
+                            param.grad = clipped_grads[name].float()
+
+                    optimizerD.zero_grad(set_to_none=False)
                     pen.backward(retain_graph=True)
-                    loss_d.backward()
-                    optimizerD.step()
+                    loss_d.backward() # compute gradient loss
+                    optimizerD.step() # update the discriminator
 
                 fakez = torch.normal(mean=mean, std=std)
                 condvec = self._data_sampler.sample_condvec(self._batch_size)
@@ -479,7 +511,7 @@ class CTGAN(BaseSynthesizer):
                 loss_g = -torch.mean(y_fake) + cross_entropy
 
                 optimizerG.zero_grad(set_to_none=False)
-                if self.dp:
+                if self.private:
                     # Add random noise to loss_g
                     loss_g += torch.randn(1).item()
 
