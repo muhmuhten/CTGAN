@@ -14,6 +14,8 @@ from packaging import version
 from torch import optim
 from torch.nn import BatchNorm1d, Dropout, LeakyReLU, Linear, Module, ReLU, Sequential, functional, utils
 from tqdm import tqdm
+
+import matplotlib
 import matplotlib.pyplot as plt
 
 from ctgan.data_sampler import DataSampler
@@ -183,7 +185,7 @@ class CTGAN(BaseSynthesizer):
         private=False,
         clip_coeff=0.1,
         sigma=2,
-        target_epsilon=1e-5,
+        target_epsilon=5e-5,
         target_delta=1e-5,
     ):
         assert batch_size % 2 == 0
