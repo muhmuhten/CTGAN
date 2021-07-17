@@ -16,6 +16,7 @@ from ctgan.data_sampler import DataSampler
 from ctgan.data_transformer import DataTransformer
 from ctgan.errors import InvalidDataError
 from ctgan.synthesizers.base import BaseSynthesizer, random_state
+from dp.rdp_accountant import compute_rdp, get_privacy_spent
 
 
 class Discriminator(Module):
@@ -178,8 +179,8 @@ class CTGAN(BaseSynthesizer):
         private=False,
         clip_coeff=0.1,
         sigma=2,
-        epsilon=None,
-        delta=None):
+        target_epsilon=1e-5,
+        target_delta=1e-5,
     ):
         assert batch_size % 2 == 0
 
@@ -202,8 +203,8 @@ class CTGAN(BaseSynthesizer):
         self.private = private
         self.clip_coeff = clip_coeff
         self.sigma = sigma
-        self.epsilon = epsilon
-        self.delta = delta
+        self.target_epsilon = target_epsilon
+        self.target_delta = target_delta
         if self.private:
             print('Init CTGAN with differential privacy')
 
@@ -407,14 +408,11 @@ class CTGAN(BaseSynthesizer):
         std = mean + 1
 
         self.loss_values = pd.DataFrame(columns=['Epoch', 'Generator Loss', 'Distriminator Loss'])
-
-        epoch_iterator = tqdm(range(epochs), disable=(not self._verbose))
-        if self._verbose:
-            description = 'Gen. ({gen:.2f}) | Discrim. ({dis:.2f})'
-            epoch_iterator.set_description(description.format(gen=0, dis=0))
-
-        steps_per_epoch = max(len(train_data) // self._batch_size, 1)
-        for i in epoch_iterator:
+        i = 0
+        epsilon = 0
+        while epsilon < self.target_epsilon:
+            steps_per_epoch = max(len(train_data) // self._batch_size, 1)
+            # for i in range(epochs):
             for id_ in range(steps_per_epoch):
                 for n in range(self._discriminator_steps):
                     fakez = torch.normal(mean=mean, std=std)
@@ -517,8 +515,28 @@ class CTGAN(BaseSynthesizer):
                 loss_g.backward()
                 optimizerG.step()
 
-            generator_loss = loss_g.detach().cpu().item()
-            discriminator_loss = loss_d.detach().cpu().item()
+            if self.private:
+                # calculate current privacy cost using the accountant
+                max_lmbd = 400
+                lmbds = range(2, max_lmbd + 1)
+                rdp = compute_rdp(self._batch_size / len(train_data),
+                                  self.sigma,
+                                  steps_per_epoch,
+                                  lmbds)
+                epsilon, _, _ = get_privacy_spent(lmbds, rdp, self.target_delta)
+
+            if self._verbose:
+                print(f"Epoch {i + 1}, "
+                      f"Loss G: {loss_g.detach().cpu(): .4f}, "
+                      f"Loss D: {loss_d.detach().cpu(): .4f}, "
+                      f"Epsilon: {round(epsilon, 8)}, "
+                      f"Target Epsilon: {self.target_epsilon}",
+
+                      flush=True)
+                i += 1
+                # print(f"Epoch {i+1}, Loss G: {loss_g.detach().cpu(): .4f},"
+                #       f"Loss D: {loss_d.detach().cpu(): .4f}",
+                #       flush=True)
 
             epoch_loss_df = pd.DataFrame({
                 'Epoch': [i],
