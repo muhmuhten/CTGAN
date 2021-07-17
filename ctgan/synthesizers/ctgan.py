@@ -20,7 +20,7 @@ from ctgan.data_sampler import DataSampler
 from ctgan.data_transformer import DataTransformer
 from ctgan.errors import InvalidDataError
 from ctgan.synthesizers.base import BaseSynthesizer, random_state
-from dp.rdp_accountant import compute_rdp, get_privacy_spent
+from ctgan.rdp_accountant import compute_rdp, get_privacy_spent
 
 
 class Discriminator(Module):
