@@ -143,8 +143,6 @@ class CTGAN(BaseSynthesizer):
             sampling. Defaults to ``True``.
         verbose (boolean):
             Whether to have print statements for progress results. Defaults to ``False``.
-        epochs (int):
-            Number of training epochs. Defaults to 300.
         pac (int):
             Number of samples to group together when applying the discriminator.
             Defaults to 10.
@@ -179,7 +177,6 @@ class CTGAN(BaseSynthesizer):
         discriminator_steps=1,
         log_frequency=True,
         verbose=False,
-        epochs=300,
         pac=10,
         cuda=True,
         private=False,
@@ -203,7 +200,6 @@ class CTGAN(BaseSynthesizer):
         self._discriminator_steps = discriminator_steps
         self._log_frequency = log_frequency
         self._verbose = verbose
-        self._epochs = epochs
         self.pac = pac
 
         self._private = private
@@ -408,11 +404,12 @@ class CTGAN(BaseSynthesizer):
         self._D_losses = []
         epsilon = 0
         steps = 0
-        print("Starting Training:")
+        print("\nStarting Training:\n")
 
         steps_per_epoch = max(len(train_data) // self._batch_size, 1)
+
         while epsilon < self._target_epsilon:
-        # for i in range(self._epochs):
+
             for id_ in range(steps_per_epoch):
 
                 ############################
@@ -546,9 +543,6 @@ class CTGAN(BaseSynthesizer):
                       f"Loss D: {loss_d.detach().cpu(): .4f}, "
                       f"Epsilon: {epsilon:.4f}", flush=True)
                 i += 1
-                # print(f"Epoch {i+1}, Loss G: {loss_g.detach().cpu(): .4f},"
-                #       f"Loss D: {loss_d.detach().cpu(): .4f}",
-                #       flush=True)
 
             epoch_loss_df = pd.DataFrame({
                 'Epoch': [i],
