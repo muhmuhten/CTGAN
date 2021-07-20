@@ -1,34 +1,64 @@
 import warnings
+
 warnings.simplefilter(action='ignore', category=FutureWarning)
 from sklearn.exceptions import ConvergenceWarning
+
 warnings.simplefilter(action='ignore', category=ConvergenceWarning)
 
-from ctgan import CTGANSynthesizer
-from utils import convert_seizure_ds, eval_dataset
+from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import train_test_split
+from ctgan import CTGANSynthesizer
+from utils import eval_dataset
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+def map_gender(df):
+    gender_map = {'Male': 1, 'Female': 0}
+    df['gender'] = df['gender'].map(gender_map).astype(int)
+    df['patient'] -= 1
+    return df
+
+
 if __name__ == '__main__':
-    url = 'https://raw.githubusercontent.com/juliecious/sml-dataset/master/dataSets/Epileptic_Seizure_Recognition.csv'
-    data = pd.read_csv(url)
-    data = data.drop('Unnamed', axis=1)
-    target = 'y'
+
+    url = 'https://archive.ics.uci.edu/ml/machine-learning-databases/00225/Indian%20Liver%20Patient%20Dataset%20(ILPD).csv'
+    columns = [
+        'age',
+        'gender',
+        'tb',
+        'db',
+        'alkphos Alkaline Phosphotase',
+        'sgpt Alamine Aminotransferase',
+        'sgot Aspartate Aminotransferase',
+        'tp',
+        'alb',
+        'a/g Ratio Albumin and Globulin Ratio',
+        'patient' # liver patient or not
+    ]
+    data = pd.read_csv(url, names=columns)
+    data.dropna(how='any', inplace=True)
+
+    target = 'patient'
+
+    num_cols = data._get_numeric_data().columns
+    cols = data.columns
+    discrete_columns = list(set(cols) - set(num_cols))
+
     ctgan = CTGANSynthesizer(verbose=True,
                              # epochs=10,
                              private=True,
                              clip_coeff=0.15,
-                             # sigma=6,
+                             sigma=6,
                              target_epsilon=5,
                              target_delta=1e-5
                              )
-    ctgan.fit(data)
+    ctgan.fit(data, discrete_columns)
     ctgan.plot_losses(save=True)
 
     # evaluate performance using real data
-    data = convert_seizure_ds(data)
+    data = map_gender(data)
     X = data.drop([target], axis=1)
     y = data[target]
 
@@ -38,11 +68,13 @@ if __name__ == '__main__':
 
     # evaluate performance using fake data
     samples = ctgan.sample(len(data))  # Synthetic copy
-    _samples = convert_seizure_ds(samples)
-    _samples.dropna(how='any', inplace=True)
+    samples.dropna(how='any', inplace=True)
+    samples = map_gender(samples)
+    X_syn = samples.drop([target], axis=1)
+    y_syn = samples[target]
 
-    X_syn = _samples.drop([target], axis=1)
-    y_syn = _samples[target]
+    y_syn = y_syn.replace(-1, 0)
+
     print('\nTrain on fake, test on real')
     fake, tstr = eval_dataset(X_syn, y_syn, X_test, y_test)
 
@@ -57,4 +89,3 @@ if __name__ == '__main__':
     plt.legend(['TRTR', 'TSTR'])
     plt.savefig('comparison.png')
     plt.show()
-
