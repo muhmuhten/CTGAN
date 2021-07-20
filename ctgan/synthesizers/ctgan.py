@@ -539,9 +539,6 @@ class CTGAN(BaseSynthesizer):
                                   steps,
                                   lmbds)
                 epsilon, _, _ = get_privacy_spent(lmbds, rdp, None, self._target_delta)
-            else:
-                if i > self._epochs:
-                    epsilon = np.inf
 
             # Output training stats
             if self._verbose:
@@ -575,8 +572,7 @@ class CTGAN(BaseSynthesizer):
         plt.plot(self._D_losses, label='D')
         plt.xlabel('iterations')
         plt.ylabel('Loss')
-        interval = len(self._G_losses)//5 if len(self._G_losses) > 5 else len(self._G_losses)
-        x_ticks = np.arange(0, len(self._G_losses), interval)
+        x_ticks = np.arange(0, len(self._G_losses), len(self._G_losses)//5)
         plt.xticks(x_ticks)
         plt.legend()
         if save:
