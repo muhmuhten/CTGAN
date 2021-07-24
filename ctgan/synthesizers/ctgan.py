@@ -1,9 +1,6 @@
 """CTGAN module."""
 
 import warnings
-warnings.simplefilter(action='ignore', category=FutureWarning)
-from sklearn.exceptions import ConvergenceWarning
-warnings.simplefilter(action='ignore', category=ConvergenceWarning)
 
 import numpy as np
 import pandas as pd
@@ -13,15 +10,10 @@ from packaging import version
 
 from torch import optim
 from torch.nn import BatchNorm1d, Dropout, LeakyReLU, Linear, Module, ReLU, Sequential, functional, utils
-from tqdm import tqdm
-
-import matplotlib.pyplot as plt
 
 from ctgan.data_sampler import DataSampler
 from ctgan.data_transformer import DataTransformer
-from ctgan.errors import InvalidDataError
 from ctgan.synthesizers.base import BaseSynthesizer, random_state
-from ctgan.rdp_accountant import compute_rdp, get_privacy_spent
 
 
 class Discriminator(Module):
@@ -131,6 +123,9 @@ class CTGAN(BaseSynthesizer):
             Learning rate for the discriminator. Defaults to 2e-4.
         discriminator_decay (float):
             Discriminator weight decay for the Adam Optimizer. Defaults to 1e-6.
+        betas (tuple[float, float]):
+            Coefficients used for computing running averages of gradient and its square.
+            Defaults to (0.5, 0.99).
         batch_size (int):
             Number of data samples to process in each step.
         discriminator_steps (int):
@@ -151,18 +146,6 @@ class CTGAN(BaseSynthesizer):
             Whether to attempt to use cuda for GPU computation.
             If this is False or CUDA is not available, CPU will be used.
             Defaults to ``True``.
-        private (bool):
-            Inject random noise during optimization procedure in order to achieve
-            differential privacy. Currently only naively inject noise.
-            Defaults to ``False``.
-        clip_coeff (int):
-            Gradient clipping bound. Defaults to ``0.1``.
-        sigma (int):
-            Noise scale. Defaults to ``2``.
-        epsilon (int):
-            Differential privacy budget
-        delta (int):
-            Differential privacy budget
     """
 
     def __init__(
@@ -173,6 +156,7 @@ class CTGAN(BaseSynthesizer):
         generator_lr=2e-4,
         generator_decay=1e-6,
         discriminator_lr=2e-4,
+        betas=(0.5, 0.99),
         discriminator_decay=1e-6,
         batch_size=500,
         discriminator_steps=1,
@@ -197,6 +181,7 @@ class CTGAN(BaseSynthesizer):
         self._generator_decay = generator_decay
         self._discriminator_lr = discriminator_lr
         self._discriminator_decay = discriminator_decay
+        self._betas = betas
 
         self._batch_size = batch_size
         self._discriminator_steps = discriminator_steps
@@ -204,15 +189,6 @@ class CTGAN(BaseSynthesizer):
         self._verbose = verbose
         self._epochs = epochs
         self.pac = pac
-
-        self._private = private
-        self._clip_coeff = clip_coeff
-        self._sigma = sigma
-        self._target_epsilon = target_epsilon
-        self._target_delta = target_delta
-        if self._private:
-            print(f'Init CTGAN with differential privacy. '
-                  f'Target epsilon: {self._target_epsilon}')
 
         if not cuda or not torch.cuda.is_available():
             device = 'cpu'
@@ -350,8 +326,7 @@ class CTGAN(BaseSynthesizer):
                 'Please remove all null values from your continuous training data.'
             )
 
-    @random_state
-    def fit(self, train_data, discrete_columns=(), plot=False):
+    def fit(self, train_data, discrete_columns=(), epochs=None):
         """Fit the CTGAN Synthesizer models to the training data.
 
         Args:
@@ -364,6 +339,15 @@ class CTGAN(BaseSynthesizer):
                 a ``pandas.DataFrame``, this list should contain the column names.
         """
         self._validate_discrete_columns(train_data, discrete_columns)
+
+        if epochs is None:
+            epochs = self._epochs
+        else:
+            warnings.warn(
+                ('`epochs` argument in `fit` method has been deprecated and will be removed '
+                 'in a future version. Please pass `epochs` to the constructor instead'),
+                DeprecationWarning
+            )
 
         self._transformer = DataTransformer()
         self._transformer.fit(train_data, discrete_columns)
@@ -387,14 +371,14 @@ class CTGAN(BaseSynthesizer):
         optimizerG = optim.Adam(
             self._generator.parameters(),
             lr=self._generator_lr,
-            betas=(0.5, 0.9),
+            betas=self._betas,
             weight_decay=self._generator_decay,
         )
 
         optimizerD = optim.Adam(
             discriminator.parameters(),
             lr=self._discriminator_lr,
-            betas=(0.5, 0.9),
+            betas=self._betas,
             weight_decay=self._discriminator_decay,
         )
 
@@ -412,32 +396,13 @@ class CTGAN(BaseSynthesizer):
         print("\nStarting Training:\n")
 
         steps_per_epoch = max(len(train_data) // self._batch_size, 1)
-
-        while epsilon < self._target_epsilon:
-
+        for i in range(epochs):
             for id_ in range(steps_per_epoch):
 
-                ############################
-                # (1) Update D network
-                ###########################
                 for n in range(self._discriminator_steps):
-                    if self._private:
-                        for name, param in discriminator.named_parameters():
-                            if param.grad is not None:
-                                # clip gradient by the threshold C
-                                clipped_gradient = param.grad / max(1, torch.norm(param.grad, 2) / self._clip_coeff)
-                                # generate random noise from a Gaussian distribution
-                                noise = torch.DoubleTensor(param.size())\
-                                        .normal_(0, (self._sigma * self._clip_coeff)**2)\
-                                        .to(self._device)
-
-                                param.grad = (clipped_gradient + noise).float()
-                        steps += 1
-
-                    # train with fake
                     fakez = torch.normal(mean=mean, std=std)
-                    condvec = self._data_sampler.sample_condvec(self._batch_size)
 
+                    condvec = self._data_sampler.sample_condvec(self._batch_size)
                     if condvec is None:
                         c1, m1, col, opt = None, None, None, None
                         real = self._data_sampler.sample_data(
@@ -474,17 +439,13 @@ class CTGAN(BaseSynthesizer):
                     pen = discriminator.calc_gradient_penalty(
                         real_cat, fake_cat, self._device, self.pac
                     )
-
-                    loss_d = -(torch.mean(y_real) - torch.mean(y_fake))  # + pen
+                    loss_d = -(torch.mean(y_real) - torch.mean(y_fake))
 
                     optimizerD.zero_grad(set_to_none=False)
                     pen.backward(retain_graph=True)
-                    loss_d.backward()  # Calculate gradients for D in backward pass
-                    optimizerD.step()  # Update D
+                    loss_d.backward()
+                    optimizerD.step()
 
-                ############################
-                # (2) Update G network
-                ###########################
                 fakez = torch.normal(mean=mean, std=std)
                 condvec = self._data_sampler.sample_condvec(self._batch_size)
 
@@ -496,10 +457,9 @@ class CTGAN(BaseSynthesizer):
                     m1 = torch.from_numpy(m1).to(self._device)
                     fakez = torch.cat([fakez, c1], dim=1)
 
-                fake = self._generator(fakez)  # Generate fake data batch with G
+                fake = self._generator(fakez)
                 fakeact = self._apply_activate(fake)
 
-                # Since we just updated D, perform another forward pass
                 if c1 is not None:
                     y_fake = discriminator(torch.cat([fakeact, c1], dim=1))
                 else:
@@ -510,31 +470,12 @@ class CTGAN(BaseSynthesizer):
                 else:
                     cross_entropy = self._cond_loss(fake, c1, m1)
 
-                # Calculate G's loss based on this output
                 loss_g = -torch.mean(y_fake) + cross_entropy
 
                 optimizerG.zero_grad(set_to_none=False)
                 loss_g.backward()  # Calculate gradients for G
                 optimizerG.step()  # Update G
 
-            # Save losses for plotting later
-            self._G_losses.append(loss_g.item())
-            self._D_losses.append(loss_d.item())
-            epoch += 1
-
-            if self._private:
-                # calculate current privacy cost using the accountant
-                max_lmbd = 4095
-                lmbds = range(2, max_lmbd + 1)
-                rdp = compute_rdp(self._batch_size / len(train_data),
-                                  self._sigma, steps, lmbds)
-                epsilon, _, _ = get_privacy_spent(lmbds, rdp, None, self._target_delta)
-                self._epsilons.append(epsilon)
-            else:
-                if epoch > self._epochs:
-                    epsilon = np.inf
-
-            # Output training stats
             if self._verbose:
                 print(f"Epoch {i + 1}, "
                       f"Loss G: {loss_g.detach().cpu(): .4f}, "
@@ -573,8 +514,6 @@ class CTGAN(BaseSynthesizer):
         if save:
             plt.savefig('losses.png')
         plt.show()
-
-
 
     @random_state
     def sample(self, n, condition_column=None, condition_value=None):
