@@ -1,9 +1,16 @@
 """Synthesizers module."""
+from ctgan.synthesizers.ctgan import CTGANSynthesizer
+from ctgan.synthesizers.tvae import TVAESynthesizer
+from ctgan.synthesizers.dp_ctgan import DPCTGANSynthesizer
+from ctgan.synthesizers.adp_ctgan import ADPCTGANSynthesizer
 
-from ctgan.synthesizers.ctgan import CTGAN
-from ctgan.synthesizers.tvae import TVAE
+__all__ = (
+    'CTGANSynthesizer',
+    'TVAESynthesizer'
+    'DPCTGANSynthesizer',
+    'ADPCTGANSynthesizer'
 
-__all__ = ('CTGAN', 'TVAE')
+)
 
 
 def get_all_synthesizers():
