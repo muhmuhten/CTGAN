@@ -171,7 +171,7 @@ class CTGAN(BaseSynthesizer):
         target_epsilon=3,
         target_delta=1e-5,
     ):
-        assert batch_size % 2 == 0
+        # assert batch_size % 2 == 0
 
         self._embedding_dim = embedding_dim
         self._generator_dim = generator_dim
