@@ -6,7 +6,7 @@ from ctgan.synthesizers.adp_ctgan import ADPCTGAN
 
 __all__ = (
     'CTGAN',
-    'TVAE'
+    'TVAE',
     'DPCTGAN',
     'ADPCTGAN'
 )
