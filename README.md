@@ -1,3 +1,3 @@
 wip
 
-The packaging is not correct and very cursed, for now run `pip install ctgan` and copy this package's ctgan over the install.
+The packaging does not seem to compute the right depedencies out of the box (issue seems to exist already in upstream), best bet seem to be to have conda compute a viable set of matplotlib + sdgym + xgboost.
